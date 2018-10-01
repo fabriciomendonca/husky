@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as pkgDir from 'pkg-dir'
 import getConf from '../getConf'
+import getHooksDir from './getHooksDir'
 import getScript from './getScript'
 import { isGhooks, isHusky, isPreCommit, isYorkie } from './is'
 import resolveGitDir from './resolveGitDir'
@@ -102,8 +103,7 @@ function isInNodeModules(dir: string) {
   return (dir.match(/node_modules/g) || []).length > 1
 }
 
-function getHooks(gitDir: string): string[] {
-  const gitHooksDir = path.join(gitDir, 'hooks')
+function getHooks(gitHooksDir: string): string[] {
   return hookList.map(hookName => path.join(gitHooksDir, hookName))
 }
 
@@ -173,9 +173,12 @@ export function install(
     return
   }
 
-  if (!fs.existsSync(path.join(resolvedGitDir, 'hooks'))) {
+  // Set hooks directory according to user configurations
+  const hooksDir = getHooksDir(resolvedGitDir)
+
+  if (!fs.existsSync(hooksDir)) {
     console.log(
-      `Can't find hooks directory in ${resolvedGitDir}, skipping Git hooks installation.`
+      `Can't find hooks directory in ${hooksDir}, skipping Git hooks installation.`
     )
     console.log(
       `Please create ${path.join(
@@ -190,7 +193,7 @@ export function install(
   // Get root dir based on the first .git directory of file found
   const rootDir = path.dirname(gitDirOrFile)
 
-  const hooks = getHooks(resolvedGitDir)
+  const hooks = getHooks(hooksDir)
   const script = getScript(rootDir, huskyDir, requireRunNodePath)
   createHooks(hooks, script)
 
@@ -217,7 +220,8 @@ export function uninstall(huskyDir: string) {
   }
 
   // Remove hooks
-  const hooks = getHooks(resolvedGitDir)
+  const hooksDir = getHooksDir(resolvedGitDir)
+  const hooks = getHooks(hooksDir)
   removeHooks(hooks)
 
   console.log('husky > done')

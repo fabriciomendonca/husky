@@ -5,11 +5,17 @@ import * as os from 'os'
 import * as path from 'path'
 import * as tempy from 'tempy'
 import { install, uninstall } from '../'
+import getHooksDir from '../getHooksDir'
 import { huskyIdentifier } from '../getScript'
 
+jest.mock('../getHooksDir')
 let tempDir
 
 const pkg = JSON.stringify({})
+
+function setupMocks({ hooksDir }) {
+  ;(getHooksDir as jest.Mock).mockReturnValue(path.join(tempDir, hooksDir))
+}
 
 function installFrom(
   huskyDir: string,
@@ -52,6 +58,9 @@ describe('install', () => {
   beforeEach(() => {
     delete process.env.INIT_CWD
     tempDir = tempy.directory()
+    setupMocks({
+      hooksDir: '.git/hooks'
+    })
   })
   afterEach(() => del(tempDir, { force: true }))
 
@@ -60,6 +69,25 @@ describe('install', () => {
     const hookFilename = '.git/hooks/pre-commit'
 
     mkdir('.git/hooks')
+    mkdir(huskyDir)
+    writeFile('package.json', pkg)
+
+    installFrom(huskyDir)
+    expectHookToExist(hookFilename)
+
+    uninstallFrom(huskyDir)
+    expect(exists(hookFilename)).toBeFalsy()
+  })
+
+  it('should install and uninstall from a custom hooks folder', () => {
+    const huskyDir = 'node_modules/husky'
+    const hookFilename = '.githooks/pre-commit'
+    setupMocks({
+      hooksDir: '.githooks'
+    })
+
+    mkdir('.git')
+    mkdir('.githooks')
     mkdir(huskyDir)
     writeFile('package.json', pkg)
 
@@ -161,63 +189,6 @@ describe('install', () => {
     expect(exists('.git/hooks/pre-commit')).toBeFalsy()
   })
 
-  it('should support git submodule', () => {
-    mkdir('.git/modules/A/B/hooks')
-    mkdir('A/B/node_modules/husky')
-    writeFile('A/B/package.json', pkg)
-    writeFile('A/B/.git', 'git: ../../.git/modules/A/B')
-
-    installFrom('A/B/node_modules/husky', 'A/B/node_modules/.bin/run-node')
-    const hook = readFile('.git/modules/A/B/hooks/pre-commit')
-
-    const node =
-      os.platform() !== 'win32' ? 'node_modules/.bin/run-node' : 'node'
-    expect(hook).toMatch(node)
-    expect(hook).toMatch('node_modules/husky/lib/runner/bin.js')
-
-    uninstallFrom('A/B/node_modules/husky')
-    expect(exists('.git/modules/A/B/hooks/pre-commit')).toBeFalsy()
-  })
-
-  it('should support git submodule and sub directory', () => {
-    mkdir('.git/modules/A/B/hooks')
-    mkdir('A/B/C/node_modules/husky')
-    writeFile('A/B/C/package.json', pkg)
-    writeFile('A/B/.git', 'git: ../../.git/modules/A/B')
-
-    installFrom('A/B/C/node_modules/husky', 'A/B/C/node_modules/.bin/run-node')
-    const hook = readFile('.git/modules/A/B/hooks/pre-commit')
-
-    const node =
-      os.platform() !== 'win32' ? 'C/node_modules/.bin/run-node' : 'node'
-    expect(hook).toMatch(node)
-    expect(hook).toMatch('C/node_modules/husky/lib/runner/bin.js')
-
-    uninstallFrom('A/B/C/node_modules/husky')
-    expect(exists('.git/hooks/pre-push')).toBeFalsy()
-  })
-
-  it('should support git worktrees', () => {
-    mkdir('.git/worktrees/B/hooks')
-    mkdir('A/B/node_modules/husky')
-    writeFile('A/B/package.json', pkg)
-    // Git path for worktrees is absolute
-    const absolutePath = path.join(tempDir, '.git/worktrees/B')
-    writeFile('A/B/.git', `git: ${absolutePath}`)
-
-    installFrom('A/B/node_modules/husky', 'A/B/node_modules/.bin/run-node')
-
-    const hook = readFile('.git/worktrees/B/hooks/pre-commit')
-
-    const node =
-      os.platform() !== 'win32' ? 'node_modules/.bin/run-node' : 'node'
-    expect(hook).toMatch(node)
-    expect(hook).toMatch('node_modules/husky/lib/runner/bin.js')
-
-    uninstallFrom('A/B/node_modules/husky')
-    expect(exists('.git/worktrees/B/hooks/pre-commit')).toBeFalsy()
-  })
-
   it('should not install from /node_modules/A/node_modules', () => {
     mkdir('.git/hooks')
     mkdir('node_modules/A/node_modules/husky')
@@ -306,5 +277,102 @@ describe('install', () => {
     writeFile('package.json', pkg)
 
     expect(() => installFrom(huskyDir)).not.toThrow()
+    expect(() => uninstallFrom(huskyDir)).not.toThrow()
+  })
+
+  it("should not crash if .git doesn't exist", () => {
+    const huskyDir = 'node_modules/husky'
+
+    mkdir(huskyDir)
+    writeFile('package.json', pkg)
+
+    expect(() => installFrom(huskyDir)).not.toThrow()
+    expect(() => uninstallFrom(huskyDir)).not.toThrow()
+  })
+
+  it("should not crash if package.json doesn't exist", () => {
+    const huskyDir = 'node_modules/husky'
+
+    mkdir('.git')
+    mkdir(huskyDir)
+
+    expect(() => installFrom(huskyDir)).not.toThrow()
+    expect(() => uninstallFrom(huskyDir)).not.toThrow()
+  })
+
+  describe('Submodules', () => {
+    beforeEach(() => {
+      setupMocks({
+        hooksDir: '.git/modules/A/B/hooks'
+      })
+    })
+
+    it('should support git submodule', () => {
+      mkdir('.git/modules/A/B/hooks')
+      mkdir('A/B/node_modules/husky')
+      writeFile('A/B/package.json', pkg)
+      writeFile('A/B/.git', 'git: ../../.git/modules/A/B')
+
+      installFrom('A/B/node_modules/husky', 'A/B/node_modules/.bin/run-node')
+      const hook = readFile('.git/modules/A/B/hooks/pre-commit')
+
+      const node =
+        os.platform() !== 'win32' ? 'node_modules/.bin/run-node' : 'node'
+      expect(hook).toMatch(node)
+      expect(hook).toMatch('node_modules/husky/lib/runner/bin.js')
+
+      uninstallFrom('A/B/node_modules/husky')
+      expect(exists('.git/modules/A/B/hooks/pre-commit')).toBeFalsy()
+    })
+
+    it('should support git submodule and sub directory', () => {
+      mkdir('.git/modules/A/B/hooks')
+      mkdir('A/B/C/node_modules/husky')
+      writeFile('A/B/C/package.json', pkg)
+      writeFile('A/B/.git', 'git: ../../.git/modules/A/B')
+
+      installFrom(
+        'A/B/C/node_modules/husky',
+        'A/B/C/node_modules/.bin/run-node'
+      )
+      const hook = readFile('.git/modules/A/B/hooks/pre-commit')
+
+      const node =
+        os.platform() !== 'win32' ? 'C/node_modules/.bin/run-node' : 'node'
+      expect(hook).toMatch(node)
+      expect(hook).toMatch('C/node_modules/husky/lib/runner/bin.js')
+
+      uninstallFrom('A/B/C/node_modules/husky')
+      expect(exists('.git/hooks/pre-push')).toBeFalsy()
+    })
+  })
+
+  describe('Worktrees', () => {
+    beforeEach(() => {
+      setupMocks({
+        hooksDir: '.git/worktrees/B/hooks'
+      })
+    })
+
+    it('should support git worktrees', () => {
+      mkdir('.git/worktrees/B/hooks')
+      mkdir('A/B/node_modules/husky')
+      writeFile('A/B/package.json', pkg)
+      // Git path for worktrees is absolute
+      const absolutePath = path.join(tempDir, '.git/worktrees/B')
+      writeFile('A/B/.git', `git: ${absolutePath}`)
+
+      installFrom('A/B/node_modules/husky', 'A/B/node_modules/.bin/run-node')
+
+      const hook = readFile('.git/worktrees/B/hooks/pre-commit')
+
+      const node =
+        os.platform() !== 'win32' ? 'node_modules/.bin/run-node' : 'node'
+      expect(hook).toMatch(node)
+      expect(hook).toMatch('node_modules/husky/lib/runner/bin.js')
+
+      uninstallFrom('A/B/node_modules/husky')
+      expect(exists('.git/worktrees/B/hooks/pre-commit')).toBeFalsy()
+    })
   })
 })
